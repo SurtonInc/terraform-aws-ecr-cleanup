@@ -1,5 +1,5 @@
 locals {
-  lambda_function_name = "${var.name_prefix}ecr-image-cleanup"
+  lambda_function_name = "${var.name_prefix}-ecr-image-cleanup"
   lambda_zip_filename  = "${path.module}/lambda_function.zip"
   lambda_source_dir    = "${path.module}/lambda"
 }
