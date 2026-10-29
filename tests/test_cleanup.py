@@ -44,6 +44,11 @@ class RetentionTests(unittest.TestCase):
     def plan(self, items, refs=(), edges=(), minimum=1, patterns=()):
         return cleanup.retention_plan({i["imageDigest"]: i for i in items}, set(edges), set(refs),
                                       URI, NOW, 90, minimum, patterns)
+    def test_incomplete_rollback_history_holds_whole_repository(self):
+        self.assertFalse(self.plan([image("sha256:old-unused"), image("sha256:old-rollback")], ["retain-all:" + URI]))
+    def test_repository_hold_does_not_mask_missing_required_image(self):
+        with self.assertRaisesRegex(RuntimeError, "Required image"):
+            self.plan([image("sha256:old")], ["retain-all:" + URI, URI + "@sha256:missing"])
     def test_old_running_digest_survives(self):
         self.assertEqual(self.plan([image("sha256:old"), image("sha256:new", 1, ["new"])],
                                    [URI + "@sha256:old"]), set())
@@ -173,6 +178,13 @@ class DiscoveryTests(unittest.TestCase):
         for name in ["current", "previous1", "previous2", "previous3"]:
             self.assertIn(URI + "@sha256:" + name, refs)
         self.assertNotIn(URI + "@sha256:older", refs)
+
+    def test_missing_ecs_history_retains_entire_service_repository(self):
+        ecs = Client({"list_clusters": {"clusterArns": ["cluster"]}, "list_services": {"serviceArns": ["service"]},
+                      "describe_services": {"services": [{"serviceArn": "service", "taskDefinition": "td:1"}]},
+                      "describe_task_definition": {"taskDefinition": {"containerDefinitions": [{"image": URI + ":prd"}]}}})
+        refs = cleanup.inventory_region("us-west-2", 4, 4, self.clients(ecs))
+        self.assertIn("retain-all:" + URI, refs)
 
     def test_ecs_partial_inventory_failure_aborts(self):
         ecs = Client({"list_clusters": {"clusterArns": ["cluster"]}, "list_services": {"serviceArns": ["service"]}, "describe_services": {"failures": [{"reason": "MISSING"}]}})
