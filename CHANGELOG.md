@@ -6,6 +6,7 @@
 
 - Discover current ECS digests, successful deployment history, task recipes and other
   supported AWS image consumers before selecting cleanup candidates.
+- Hold an entire service repository when ECS's 90-day history cannot establish the requested rollback window.
 - Retain newest tagged images and connected OCI manifest/subject families.
 - Add dry-run mode with deletion permission absent from IAM, schedule control and a
   Lambda error alarm. Add offline Python and mocked Terraform regression tests.

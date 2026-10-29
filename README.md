@@ -44,6 +44,12 @@ manual approval step. `schedule_enabled = false` stops new scheduled invocations
 A site that has not been deployed for three months still has its current ECS digest
 retained. Image age does not override a current workload reference.
 
+ECS exposes only its most recent 90 days of deployment history. If a service has fewer
+than the requested distinct successful image sets available, cleanup **holds its entire
+repository** instead of guessing which old images are valid rollbacks. The dry-run/result
+reports `held_for_incomplete_history`. Other repositories can still be cleaned. This is
+also conservative for a young service that has not yet had four distinct releases.
+
 ## Safety and scope
 
 The Lambda completes all configured repository and workload inventory before any

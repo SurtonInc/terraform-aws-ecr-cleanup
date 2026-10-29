@@ -82,6 +82,7 @@ def inventory_region(region, rollback_count, definition_count, client):
     references = set()
     ecs = client("ecs", region)
     definitions = set()
+    incomplete_history_definitions = set()
     for cluster in pages(ecs, "list_clusters", "clusterArns"):
         services = pages(ecs, "list_services", "serviceArns", cluster=cluster)
         for start in range(0, len(services), 10):
@@ -121,6 +122,13 @@ def inventory_region(region, rollback_count, definition_count, client):
                             break
                     if len(retained_releases) >= rollback_count:
                         break
+                if len(retained_releases) < rollback_count:
+                    # ECS deployment history has a 90-day lookback. Never guess which
+                    # old images are safe to remove when the required history is absent.
+                    LOG.warning("Insufficient distinct rollback history for %s; retaining its repositories", service["serviceArn"])
+                    incomplete_history_definitions.add(service["taskDefinition"])
+                    incomplete_history_definitions.update(d["taskDefinition"] for d in service.get("deployments", []))
+                    incomplete_history_definitions.update(t["taskDefinition"] for t in service.get("taskSets", []))
         # Desired RUNNING includes tasks whose actual status is PENDING.
         tasks = pages(ecs, "list_tasks", "taskArns", cluster=cluster, desiredStatus="RUNNING")
         for start in range(0, len(tasks), 100):
@@ -158,6 +166,11 @@ def inventory_region(region, rollback_count, definition_count, client):
     for arn in definitions:
         definition = ecs.describe_task_definition(taskDefinition=arn)["taskDefinition"]
         references.update(c["image"] for c in definition["containerDefinitions"])
+        if arn in incomplete_history_definitions:
+            for container in definition["containerDefinitions"]:
+                ref = image_reference(container["image"])
+                if ref:
+                    references.add("retain-all:" + ref[0] + "/" + ref[1])
 
     lamb = client("lambda", region)
     for function in pages(lamb, "list_functions", "Functions"):
@@ -235,6 +248,8 @@ def retention_plan(images, edges, references, repository_uri, now, retention_day
         if digest not in images:
             raise RuntimeError(f"Required image reference is absent from {repository_uri}: {uri}")
         protected.add(digest)
+    if "retain-all:" + repository_uri in references:
+        return set()
     cutoff = now - dt.timedelta(days=retention_days)
     for digest, image in images.items():
         if (image["imagePushedAt"] >= cutoff
@@ -279,7 +294,10 @@ def cleanup(ecr, repositories, references, retention_days, minimum_images,
         *inventories[repo["repositoryName"]], references, repo["repositoryUri"], now,
         retention_days, minimum_images, protected_tags) for repo in repositories}
     stats = {"dry_run": dry_run, "candidate_count": sum(map(len, plans.values())),
-             "deleted_count": 0, "repositories": {name: sorted(digests) for name, digests in plans.items()}}
+             "deleted_count": 0,
+             "held_for_incomplete_history": [repo["repositoryName"] for repo in repositories
+                                             if "retain-all:" + repo["repositoryUri"] in references],
+             "repositories": {name: sorted(digests) for name, digests in plans.items()}}
     LOG.info("Cleanup plan %s", json.dumps(stats))
     if dry_run:
         return stats
