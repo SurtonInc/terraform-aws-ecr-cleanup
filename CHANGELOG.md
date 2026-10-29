@@ -19,6 +19,10 @@
 
 ### Fixed
 
+- Normalize standard, FIPS and dual-stack ECR image references to the same repository.
+- Ignore non-ECS schedule payloads while validating ECS universal target inputs.
+- Retain queued/in-flight Batch job images after definition deregistration; hold the
+  repository for mutable job image tags whose resolved digest is unavailable.
 - Honor wildcard protected tag patterns documented by the module.
 - Propagate inventory and per-image deletion failures instead of reporting success.
 - Delete index/subject dependencies in ordered batches and recheck inventory before writes.

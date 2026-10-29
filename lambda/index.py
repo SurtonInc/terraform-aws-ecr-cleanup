@@ -5,6 +5,7 @@ import fnmatch
 import json
 import logging
 import os
+import re
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 
@@ -50,14 +51,22 @@ def checked(response, key):
 
 
 def image_reference(uri):
-    """Return (registry host, repository, digest-or-tag), or None for other registries."""
-    if not isinstance(uri, str) or ".dkr.ecr." not in uri:
+    """Return a canonical ECR (host, repository, digest-or-tag), else None."""
+    if not isinstance(uri, str):
         return None
     host, separator, path = uri.partition("/")
-    if not separator or not (
-        host.endswith(".amazonaws.com") or host.endswith(".amazonaws.com.cn")
-    ):
+    registry = re.fullmatch(
+        r"(\d{12})\.dkr[.-]ecr(?:-fips)?\.([a-z0-9-]+)\.(amazonaws\.com(?:\.cn)?|on\.aws|on\.amazonwebservices\.com\.cn)",
+        host,
+    )
+    if not separator or not registry:
         return None
+    account, region, domain = registry.groups()
+    domain = {
+        "on.aws": "amazonaws.com",
+        "on.amazonwebservices.com.cn": "amazonaws.com.cn",
+    }.get(domain, domain)
+    host = f"{account}.dkr.ecr.{region}.{domain}"
     if "@" in path:
         repository, value = path.rsplit("@", 1)
     else:
@@ -87,6 +96,56 @@ def images_in_object(value):
     elif isinstance(value, list):
         for child in value:
             yield from images_in_object(child)
+
+
+def target_task_definition(target):
+    """Only ECS universal targets encode their task definition in Input."""
+    definition = target.get("EcsParameters", {}).get("TaskDefinitionArn")
+    if definition:
+        return definition
+    arn = target.get("Arn", "")
+    if ":aws-sdk:ecs:" in arn:
+        payload = json.loads(target.get("Input") or "{}")
+        if not isinstance(payload, dict):
+            raise ValueError("ECS universal target Input must be a JSON object")
+        definition = payload.get("taskDefinition") or payload.get("TaskDefinition")
+        if not definition and arn.rsplit(":", 1)[-1] in ("runTask", "startTask"):
+            raise ValueError("ECS task target is missing its task definition")
+        return definition
+    return None
+
+
+def batch_job_references(batch):
+    """Queued jobs outlive deregistered definitions and may not have an ECS task."""
+    job_ids = set()
+    for queue in pages(batch, "describe_job_queues", "jobQueues"):
+        for status in ("SUBMITTED", "PENDING", "RUNNABLE", "STARTING", "RUNNING"):
+            job_ids.update(
+                job["jobId"]
+                for job in pages(
+                    batch,
+                    "list_jobs",
+                    "jobSummaryList",
+                    jobQueue=queue["jobQueueArn"],
+                    jobStatus=status,
+                )
+            )
+    references = set()
+    ordered_ids = sorted(job_ids)
+    for start in range(0, len(ordered_ids), 100):
+        requested = ordered_ids[start : start + 100]
+        jobs = batch.describe_jobs(jobs=requested).get("jobs", [])
+        if {job["jobId"] for job in jobs} != set(requested):
+            raise RuntimeError("Incomplete Batch job inventory")
+        for job in jobs:
+            for uri in images_in_object(job):
+                references.add(uri)
+                ref = image_reference(uri)
+                if ref and not ref[2].startswith("sha256:"):
+                    # Batch does not expose resolved digests. A moved tag must not
+                    # allow an in-flight job's original image to be deleted.
+                    references.add("retain-all-batch:" + ref[0] + "/" + ref[1])
+    return references
 
 
 def inventory_region(region, rollback_count, definition_count, client):
@@ -215,16 +274,9 @@ def inventory_region(region, rollback_count, definition_count, client):
                 Rule=rule["Name"],
                 EventBusName=bus["Name"],
             ):
-                if target.get("EcsParameters", {}).get("TaskDefinitionArn"):
-                    definitions.add(target["EcsParameters"]["TaskDefinitionArn"])
-                # Universal targets can embed an ECS RunTask request.
-                payload = json.loads(target.get("Input") or "{}")
-                if isinstance(payload, dict) and (
-                    payload.get("taskDefinition") or payload.get("TaskDefinition")
-                ):
-                    definitions.add(
-                        payload.get("taskDefinition") or payload["TaskDefinition"]
-                    )
+                definition = target_task_definition(target)
+                if definition:
+                    definitions.add(definition)
     scheduler = client("scheduler", region)
     for group in pages(scheduler, "list_schedule_groups", "ScheduleGroups"):
         for schedule in pages(
@@ -233,15 +285,9 @@ def inventory_region(region, rollback_count, definition_count, client):
             target = scheduler.get_schedule(
                 Name=schedule["Name"], GroupName=group["Name"]
             )["Target"]
-            if target.get("EcsParameters", {}).get("TaskDefinitionArn"):
-                definitions.add(target["EcsParameters"]["TaskDefinitionArn"])
-            payload = json.loads(target.get("Input") or "{}")
-            if isinstance(payload, dict) and (
-                payload.get("taskDefinition") or payload.get("TaskDefinition")
-            ):
-                definitions.add(
-                    payload.get("taskDefinition") or payload["TaskDefinition"]
-                )
+            definition = target_task_definition(target)
+            if definition:
+                definitions.add(definition)
     for arn in definitions:
         definition = ecs.describe_task_definition(taskDefinition=arn)["taskDefinition"]
         references.update(c["image"] for c in definition["containerDefinitions"])
@@ -270,6 +316,7 @@ def inventory_region(region, rollback_count, definition_count, client):
         batch, "describe_job_definitions", "jobDefinitions", status="ACTIVE"
     ):
         references.update(images_in_object(definition))
+    references.update(batch_job_references(batch))
     build = client("codebuild", region)
     projects = pages(build, "list_projects", "projects")
     for start in range(0, len(projects), 100):
@@ -372,7 +419,10 @@ def retention_plan(
                 f"Required image reference is absent from {repository_uri}: {uri}"
             )
         protected.add(digest)
-    if "retain-all:" + repository_uri in references:
+    if (
+        "retain-all:" + repository_uri in references
+        or "retain-all-batch:" + repository_uri in references
+    ):
         return set()
     cutoff = now - dt.timedelta(days=retention_days)
     for digest, image in images.items():
@@ -457,6 +507,11 @@ def cleanup(
             repo["repositoryName"]
             for repo in repositories
             if "retain-all:" + repo["repositoryUri"] in references
+        ],
+        "held_for_unresolved_batch_images": [
+            repo["repositoryName"]
+            for repo in repositories
+            if "retain-all-batch:" + repo["repositoryUri"] in references
         ],
         "repositories": {name: sorted(digests) for name, digests in plans.items()},
     }
