@@ -40,7 +40,8 @@ resource "aws_iam_policy" "lambda_policy" {
           "events:ListEventBuses", "events:ListRules", "events:ListTargetsByRule",
           "scheduler:ListScheduleGroups", "scheduler:ListSchedules", "scheduler:GetSchedule",
           "lambda:ListFunctions", "lambda:ListVersionsByFunction", "lambda:GetFunction",
-          "batch:DescribeJobDefinitions", "codebuild:ListProjects", "codebuild:BatchGetProjects", "eks:ListClusters"
+          "batch:DescribeJobDefinitions", "codebuild:ListProjects", "codebuild:BatchGetProjects", "eks:ListClusters",
+          "apprunner:ListServices", "apprunner:DescribeService"
         ]
         Resource = "*"
       },
