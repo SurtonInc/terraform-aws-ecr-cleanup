@@ -1,1 +1,6 @@
-lambda_function.zip
+.terraform/
+.terraform.lock.hcl
+*.tfstate*
+*.zip
+__pycache__/
+*.pyc
