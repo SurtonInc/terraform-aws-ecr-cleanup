@@ -126,6 +126,11 @@ class ExecutionTests(unittest.TestCase):
     def test_cycles_are_rejected(self):
         with self.assertRaisesRegex(RuntimeError, "Cycle"):
             list(cleanup.deletion_levels({"a", "b"}, {("a", "b"), ("b", "a")}))
+    def test_inventory_uses_runtime_sdk_compatible_active_image_filter(self):
+        ecr = Client({"describe_images": {"imageDetails": []}})
+        cleanup.inventory_repository(ecr, "app")
+        self.assertEqual(ecr.calls[0][1]["filter"], {"tagStatus": "ANY"})
+
     def test_oci_image_subject_is_discovered_without_artifact_type(self):
         ecr = Client({"describe_images": {"imageDetails": [image("sha256:signature", imageManifestMediaType="application/vnd.oci.image.manifest.v1+json")]},
                       "batch_get_image": {"images": [{"imageId": {"imageDigest": "sha256:signature"}, "imageManifest": json.dumps({"subject": {"digest": "sha256:subject"}})}]}})

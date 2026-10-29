@@ -215,7 +215,7 @@ def inventory_references(regions, rollback_count, definition_count, client, appr
 def inventory_repository(ecr, repository):
     images = {i["imageDigest"]: i for i in pages(
         ecr, "describe_images", "imageDetails", repositoryName=repository,
-        filter={"imageStatus": "ANY", "tagStatus": "ANY"})}
+        filter={"tagStatus": "ANY"})}
     # Fetch index and artifact manifests, not layer/config blobs.
     manifest_ids = [digest for digest, image in images.items()
                     if image.get("imageManifestMediaType") in INDEX_TYPES | {"application/vnd.oci.image.manifest.v1+json"}
