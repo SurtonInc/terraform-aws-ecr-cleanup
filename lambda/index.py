@@ -203,7 +203,7 @@ def inventory_repository(ecr, repository):
         filter={"imageStatus": "ANY", "tagStatus": "ANY"})}
     # Fetch index and artifact manifests, not layer/config blobs.
     manifest_ids = [digest for digest, image in images.items()
-                    if image.get("imageManifestMediaType") in INDEX_TYPES
+                    if image.get("imageManifestMediaType") in INDEX_TYPES | {"application/vnd.oci.image.manifest.v1+json"}
                     or image.get("artifactMediaType") not in IMAGE_CONFIG_TYPES]
     edges = set()
     for start in range(0, len(manifest_ids), 100):
