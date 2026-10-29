@@ -153,6 +153,11 @@ class ExecutionTests(unittest.TestCase):
 class DiscoveryTests(unittest.TestCase):
     def clients(self, ecs):
         return lambda service, region: ecs if service == "ecs" else Client()
+    def test_unresolved_running_ecr_digest_stops_cleanup(self):
+        with self.assertRaisesRegex(RuntimeError, "Unresolved"):
+            cleanup.resolved_uri(URI + ":prd", None)
+        self.assertEqual(cleanup.resolved_uri(URI + "@sha256:pinned", None), URI + "@sha256:pinned")
+
     def test_current_and_successful_revision_resolved_digests(self):
         ecs = Client({
             "list_clusters": {"clusterArns": ["cluster"]},

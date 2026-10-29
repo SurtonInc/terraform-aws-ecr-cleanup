@@ -53,7 +53,7 @@ also conservative for a young service that has not yet had four distinct release
 ## Safety and scope
 
 The Lambda completes all configured repository and workload inventory before any
-mutation. Inventory/API failures and missing required image references raise errors.
+mutation. Inventory/API failures, unresolved running ECR digests and missing required image references raise errors.
 An EKS cluster stops cleanup because this module does not have Kubernetes pod access.
 Actual deletion requires a second workload inventory; if references changed, the run
 stops. Repository metadata is refreshed again before the first deletion so new tag
@@ -101,7 +101,7 @@ snapshots should retain the MIT license, upstream commit and file hashes.
 | `schedule_enabled` | `true` | Enable scheduled execution |
 | `schedule_expression` | `cron(0 1 * * ? *)` | Daily, 01:00 UTC |
 | `lambda_timeout` | `600` | 60–900 seconds |
-| `lambda_memory_size` | `256` | Lambda memory in MB |
+| `lambda_memory_size` | `1024` | Lambda memory in MB |
 | `name_prefix` | `""` | Unique resource name prefix |
 | `alarm_actions` | `[]` | Optional existing SNS alarm action ARNs |
 | `tags` | `{}` | Resource tags |

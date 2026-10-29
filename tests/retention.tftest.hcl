@@ -21,7 +21,7 @@ run "dry_run_has_no_delete_permission" {
     error_message = "App Runner discovery must work with the deployed role, including accounts with no services."
   }
   assert {
-    condition     = aws_lambda_function.ecr_cleanup.runtime == "python3.13" && aws_lambda_function.ecr_cleanup.reserved_concurrent_executions == 1
+    condition     = aws_lambda_function.ecr_cleanup.runtime == "python3.13" && aws_lambda_function.ecr_cleanup.reserved_concurrent_executions == 1 && aws_lambda_function.ecr_cleanup.memory_size == 1024
     error_message = "Use a supported runtime and avoid concurrent cleaners."
   }
 }
