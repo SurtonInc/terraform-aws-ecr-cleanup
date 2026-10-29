@@ -86,9 +86,9 @@ variable "lambda_timeout" {
   }
 }
 variable "lambda_memory_size" {
-  description = "Lambda memory in MB."
+  description = "Lambda memory in MB; allow headroom for concurrent multi-region SDK inventory."
   type        = number
-  default     = 256
+  default     = 1024
 }
 variable "name_prefix" {
   description = "Unique prefix per module instance, including region when sharing an account."

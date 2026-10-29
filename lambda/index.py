@@ -61,6 +61,8 @@ def image_reference(uri):
 
 def resolved_uri(uri, digest):
     reference = image_reference(uri)
+    if reference and not digest and not reference[2].startswith("sha256:"):
+        raise RuntimeError("Unresolved running ECR image digest; retry after task image resolution")
     return f"{reference[0]}/{reference[1]}@{digest}" if reference and digest else uri
 
 
