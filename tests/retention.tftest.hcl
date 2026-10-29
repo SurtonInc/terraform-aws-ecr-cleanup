@@ -17,6 +17,10 @@ run "dry_run_has_no_delete_permission" {
     error_message = "Dry-run must prevent deletion both in code configuration and IAM."
   }
   assert {
+    condition     = strcontains(aws_iam_policy.lambda_policy.policy, "apprunner:ListServices") && strcontains(aws_iam_policy.lambda_policy.policy, "apprunner:DescribeService")
+    error_message = "App Runner discovery must work with the deployed role, including accounts with no services."
+  }
+  assert {
     condition     = aws_lambda_function.ecr_cleanup.runtime == "python3.13" && aws_lambda_function.ecr_cleanup.reserved_concurrent_executions == 1
     error_message = "Use a supported runtime and avoid concurrent cleaners."
   }
