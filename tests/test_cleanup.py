@@ -537,5 +537,269 @@ class DiscoveryTests(unittest.TestCase):
         )
 
 
+class EndpointTests(unittest.TestCase):
+    def test_dual_stack_service_history_hold_uses_canonical_repository(self):
+        alias = "123456789012.dkr-ecr.us-west-2.on.aws/app"
+        ecs = Client(
+            {
+                "list_clusters": {"clusterArns": ["cluster"]},
+                "list_services": {"serviceArns": ["service"]},
+                "describe_services": {
+                    "services": [{"serviceArn": "service", "taskDefinition": "td:1"}]
+                },
+                "describe_task_definition": {
+                    "taskDefinition": {
+                        "containerDefinitions": [{"image": alias + ":prd"}]
+                    }
+                },
+            }
+        )
+        refs = cleanup.inventory_region(
+            "us-west-2", 4, 4, lambda name, region: ecs if name == "ecs" else Client()
+        )
+        images = {
+            "sha256:old-rollback": image("sha256:old-rollback"),
+            "sha256:current": image("sha256:current", 1, ["prd"]),
+        }
+        self.assertFalse(
+            cleanup.retention_plan(images, set(), refs, URI, NOW, 90, 1, [])
+        )
+
+    def test_endpoint_aliases_protect_the_canonical_repository(self):
+        for host in (
+            HOST,
+            "123456789012.dkr.ecr-fips.us-west-2.amazonaws.com",
+            "123456789012.dkr-ecr.us-west-2.on.aws",
+            "123456789012.dkr-ecr-fips.us-west-2.on.aws",
+        ):
+            with self.subTest(host=host):
+                images = {"sha256:running": image("sha256:running")}
+                refs = {host + "/app@sha256:running"}
+                self.assertFalse(
+                    cleanup.retention_plan(images, set(), refs, URI, NOW, 90, 1, [])
+                )
+                self.assertEqual(
+                    cleanup.resolved_uri(host + "/app:prd", "sha256:running"),
+                    URI + "@sha256:running",
+                )
+
+    def test_china_registry_partition_is_preserved(self):
+        for host in (
+            "123456789012.dkr.ecr.cn-north-1.amazonaws.com.cn",
+            "123456789012.dkr-ecr.cn-north-1.on.amazonwebservices.com.cn",
+        ):
+            with self.subTest(host=host):
+                self.assertEqual(
+                    cleanup.image_reference(host + "/app:prd"),
+                    ("123456789012.dkr.ecr.cn-north-1.amazonaws.com.cn", "app", "prd"),
+                )
+
+    def test_unresolved_alternate_endpoint_task_fails_closed(self):
+        with self.assertRaisesRegex(RuntimeError, "Unresolved"):
+            cleanup.resolved_uri("123456789012.dkr-ecr.us-west-2.on.aws/app:prd", None)
+
+    def test_other_registries_are_not_treated_as_private_ecr(self):
+        for uri in (
+            "public.ecr.aws/app:prd",
+            "docker.io/app:prd",
+            "https://example.com/app:prd",
+            None,
+        ):
+            with self.subTest(uri=uri):
+                self.assertIsNone(cleanup.image_reference(uri))
+
+
+class ScheduledTargetTests(unittest.TestCase):
+    def discover(self, service, target):
+        if service == "events":
+            source = Client(
+                {
+                    "list_event_buses": {"EventBuses": [{"Name": "default"}]},
+                    "list_rules": {"Rules": [{"Name": "rule"}]},
+                    "list_targets_by_rule": {"Targets": [target]},
+                }
+            )
+        else:
+            source = Client(
+                {
+                    "list_schedule_groups": {"ScheduleGroups": [{"Name": "default"}]},
+                    "list_schedules": {"Schedules": [{"Name": "schedule"}]},
+                    "get_schedule": {"Target": target},
+                }
+            )
+        ecs = Client(
+            {
+                "describe_task_definition": {
+                    "taskDefinition": {
+                        "containerDefinitions": [{"image": URI + ":scheduled"}]
+                    }
+                }
+            }
+        )
+        clients = {service: source, "ecs": ecs}
+        return cleanup.inventory_region(
+            "us-west-2", 4, 4, lambda name, region: clients.get(name, Client())
+        )
+
+    def test_unrelated_plaintext_targets_do_not_stop_inventory(self):
+        for service in ("events", "scheduler"):
+            with self.subTest(service=service):
+                self.assertFalse(
+                    self.discover(
+                        service,
+                        {
+                            "Arn": "arn:aws:sqs:us-west-2:123456789012:queue",
+                            "Input": "plain text",
+                        },
+                    )
+                )
+
+    def test_templated_ecs_target_reads_its_definition_without_parsing_input(self):
+        for service in ("events", "scheduler"):
+            with self.subTest(service=service):
+                refs = self.discover(
+                    service,
+                    {
+                        "EcsParameters": {"TaskDefinitionArn": "td:1"},
+                        "Input": "plain text",
+                    },
+                )
+                self.assertIn(URI + ":scheduled", refs)
+
+    def test_universal_ecs_target_reads_task_definition(self):
+        for action, key in (
+            ("runTask", "taskDefinition"),
+            ("startTask", "TaskDefinition"),
+            ("createService", "taskDefinition"),
+        ):
+            with self.subTest(action=action, key=key):
+                refs = self.discover(
+                    "scheduler",
+                    {
+                        "Arn": "arn:aws:scheduler:::aws-sdk:ecs:" + action,
+                        "Input": json.dumps({key: "td:1"}),
+                    },
+                )
+                self.assertIn(URI + ":scheduled", refs)
+
+    def test_malformed_universal_ecs_input_still_stops_inventory(self):
+        with self.assertRaises(ValueError):
+            self.discover(
+                "scheduler",
+                {"Arn": "arn:aws:scheduler:::aws-sdk:ecs:runTask", "Input": "bad json"},
+            )
+
+    def test_missing_universal_ecs_definition_stops_inventory(self):
+        for payload in ({}, [], {"taskDefinition": ""}):
+            with self.subTest(payload=payload), self.assertRaises(ValueError):
+                self.discover(
+                    "scheduler",
+                    {
+                        "Arn": "arn:aws:scheduler:::aws-sdk:ecs:runTask",
+                        "Input": json.dumps(payload),
+                    },
+                )
+
+
+class BatchJobTests(unittest.TestCase):
+    def discover(self, batch):
+        return cleanup.inventory_region(
+            "us-west-2",
+            4,
+            4,
+            lambda name, region: batch if name == "batch" else Client(),
+        )
+
+    def batch(self, uri):
+        return Client(
+            {
+                "describe_job_queues": {"jobQueues": [{"jobQueueArn": "queue"}]},
+                "list_jobs": lambda **kw: (
+                    {"jobSummaryList": [{"jobId": "queued"}]}
+                    if kw["jobStatus"] == "RUNNABLE"
+                    else {}
+                ),
+                "describe_jobs": {
+                    "jobs": [
+                        {
+                            "jobId": "queued",
+                            "jobDefinition": "deregistered:1",
+                            "container": {"image": uri},
+                        }
+                    ]
+                },
+            }
+        )
+
+    def test_queued_job_retains_image_after_definition_deregistration(self):
+        refs = self.discover(self.batch(URI + "@sha256:queued"))
+        self.assertIn(URI + "@sha256:queued", refs)
+
+    def test_mutable_job_reference_holds_repository(self):
+        refs = self.discover(self.batch(URI + ":prd"))
+        images = {
+            "sha256:old-job": image("sha256:old-job"),
+            "sha256:moved-tag": image("sha256:moved-tag", 1, ["prd"]),
+        }
+        self.assertFalse(
+            cleanup.retention_plan(images, set(), refs, URI, NOW, 90, 1, [])
+        )
+
+    def test_batch_holds_are_reported_separately_from_ecs_history(self):
+        refs = self.discover(self.batch(URI + ":prd"))
+        ecr = Client(
+            {"describe_images": {"imageDetails": [image("sha256:new", 1, ["prd"])]}}
+        )
+        result = cleanup.cleanup(ecr, [REPO], refs, 90, 1, [])
+        self.assertEqual(result["held_for_incomplete_history"], [])
+        self.assertEqual(result["held_for_unresolved_batch_images"], ["app"])
+
+    def test_paginated_jobs_are_described_in_bounded_batches(self):
+        batch = self.batch(URI + "@sha256:queued")
+
+        def jobs(**kwargs):
+            if kwargs["jobStatus"] != "RUNNABLE":
+                return {}
+            if kwargs.get("nextToken"):
+                return {"jobSummaryList": [{"jobId": "last"}]}
+            return {
+                "jobSummaryList": [{"jobId": str(i)} for i in range(100)],
+                "nextToken": "page2",
+            }
+
+        batch.responses["list_jobs"] = jobs
+        batch.responses["describe_jobs"] = lambda **kw: {
+            "jobs": [
+                {"jobId": job_id, "container": {"image": URI + "@sha256:" + job_id}}
+                for job_id in kw["jobs"]
+            ]
+        }
+        refs = self.discover(batch)
+        self.assertIn(URI + "@sha256:last", refs)
+        self.assertEqual(len(refs), 101)
+        self.assertEqual(
+            [
+                len(kwargs["jobs"])
+                for op, kwargs in batch.calls
+                if op == "describe_jobs"
+            ],
+            [100, 1],
+        )
+
+    def test_incomplete_job_response_stops_cleanup(self):
+        batch = self.batch(URI + "@sha256:queued")
+        batch.responses["describe_jobs"] = {"jobs": []}
+        with self.assertRaisesRegex(RuntimeError, "Incomplete Batch"):
+            self.discover(batch)
+
+    def test_every_nonterminal_job_status_is_inventoried(self):
+        batch = self.batch(URI + "@sha256:queued")
+        self.discover(batch)
+        self.assertEqual(
+            {kwargs["jobStatus"] for op, kwargs in batch.calls if op == "list_jobs"},
+            {"SUBMITTED", "PENDING", "RUNNABLE", "STARTING", "RUNNING"},
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

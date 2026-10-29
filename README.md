@@ -35,11 +35,16 @@ manual approval step. `schedule_enabled = false` stops new scheduled invocations
   are used even when a task definition contains a mutable tag.
 - The newest `task_definition_revisions` definitions per family (default four),
   including bootstrap/migration recipes; EventBridge and Scheduler ECS task targets;
-  active Batch definitions; all container Lambda versions; CodeBuild and App Runner
-  image references.
+  active Batch definitions and nonterminal jobs; all container Lambda versions;
+  CodeBuild and App Runner image references.
 - OCI/multi-architecture manifest families and related subject artifacts whenever any
   member is retained. Archived/activating images are not deletion candidates.
 - Additional image URIs in `protected_images`, for explicit recovery requirements.
+
+Standard, FIPS and dual-stack ECR image URIs resolve to the same repository identity.
+Batch jobs remain protected after their definitions are deregistered. If an in-flight
+job uses a mutable tag, its whole repository is held because Batch does not expose the
+resolved image digest.
 
 A site that has not been deployed for three months still has its current ECS digest
 retained. Image age does not override a current workload reference.
