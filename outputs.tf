@@ -17,3 +17,14 @@ output "cloudwatch_event_rule_arn" {
   description = "ARN of the CloudWatch Event Rule"
   value       = aws_cloudwatch_event_rule.schedule.arn
 }
+
+output "configuration" {
+  description = "Retention configuration for rollout review and caller tests."
+  value = {
+    repository_names     = var.repository_names
+    retention_days       = var.retention_days
+    minimum_images       = var.minimum_images
+    rollback_deployments = var.rollback_deployments
+    dry_run              = var.dry_run
+  }
+}
