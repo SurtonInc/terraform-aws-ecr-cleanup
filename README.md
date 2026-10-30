@@ -1,166 +1,99 @@
-# ECR cleanup
+# ECR cleanup for AWS
 
-Scheduled, reference-aware retention for existing ECR repositories. The module
-starts in **dry-run**: it logs a candidate plan and its IAM role cannot delete images.
-No manual cleanup-approval tags are required.
+Automatically remove unused ECR images while retaining deployed images, rollback
+releases and their manifest families. **Dry-run by default:** it logs candidates
+and has no image-deletion IAM permission until you enable writes.
 
 ## Installation
 
-Until the module is listed in the registries, use the public Git source at the
-released `v0.2.0` tag:
-
 ```hcl
-module "ecr_cleanup" {
-  source = "git::https://github.com/SurtonInc/terraform-aws-ecr-cleanup.git?ref=v0.2.0"
+provider "aws" {
+  region = "us-west-2"
+}
 
-  name_prefix          = "application-us-west-2"
-  repository_names     = ["application-api"]
-  retention_days       = 90
-  minimum_images       = 10
-  rollback_deployments = 4
-  dry_run              = true
+module "ecr_cleanup" {
+  source  = "SurtonInc/ecr-cleanup/aws"
+  version = "~> 0.2.1"
+
+  name_prefix      = "application-us-west-2"
+  repository_names = ["application-api"]
+  retention_days   = 90
+  dry_run          = true
 }
 ```
 
-After registry registration and publication of the prepared 0.2.1 release, replace
-that source with:
+Use existing repository names and a unique `name_prefix` for each account/region.
+The module creates the scheduled Lambda, IAM role, log group and error alarm; it
+leaves repository ownership with your existing infrastructure.
 
-```hcl
-source  = "SurtonInc/ecr-cleanup/aws"
-version = "0.2.1"
-```
+OpenTofu uses its own default registry. If the module is not listed there, use
+`git::https://github.com/SurtonInc/terraform-aws-ecr-cleanup.git?ref=v0.2.1` as the
+source and omit `version`. The module is tested with both tools.
 
-The short source address uses each tool's default registry: Terraform Registry for
-Terraform and OpenTofu Registry for OpenTofu. Registry installation is not available
-until each registry has accepted the module and indexed the requested version.
+## Enable deletion
 
-Runnable checkout examples: [basic](examples/basic) and
-[shared repository](examples/shared-repository). They use the local module so they
-can be validated before registry publication. See [publishing](docs/publishing.md)
-for the separate manual release and registration steps.
+1. Deploy with `dry_run = true` and review the Lambda's successful candidate logs.
+2. Resolve inventory errors and protect any external image consumers described below.
+3. Set `dry_run = false` through a reviewed apply to enable scheduled deletion.
 
-Review the dry-run plan after deployment, then change `dry_run` to `false` through
-Terraform to enable the scheduled cleanup. This is a rollout switch, not a recurring
-manual approval step. `schedule_enabled = false` stops new scheduled invocations.
+Set `schedule_enabled = false` to stop new scheduled runs. Connect `alarm_actions`
+to an existing SNS destination if you want notifications when cleanup fails.
 
 ## What is kept
 
-- Images pushed within `retention_days` and the newest `minimum_images` tagged images
-  in each repository (defaults: 60 days and 10 tagged images).
-- Any image with a matching `protected_tags` shell pattern, regardless of age.
-  Matching is case-sensitive; `release-*` and `v*` work. Defaults include `latest`,
-  `dev`, `qa`, `stg`, `staging`, `demo`, `prd`, and `prd-*`.
-- Current ECS service definitions, active deployments and task sets, and actual
-  running/pending task digests, including services currently scaled to zero.
-- The last `rollback_deployments` **distinct successful ECS image sets per service** (default
-  four, including the current successful release). Service revision resolved digests
-  are used even when a task definition contains a mutable tag.
-- The newest `task_definition_revisions` definitions per family (default four),
-  including bootstrap/migration recipes; EventBridge and Scheduler ECS task targets;
-  active Batch definitions and nonterminal jobs; all container Lambda versions;
-  CodeBuild and App Runner image references.
-- OCI/multi-architecture manifest families and related subject artifacts whenever any
-  member is retained. Archived/activating images are not deletion candidates.
-- Additional image URIs in `protected_images`, for explicit recovery requirements.
+An image becomes eligible only after its push-age window has passed and none of
+these protections applies:
 
-Standard, FIPS and dual-stack ECR image URIs resolve to the same repository identity.
-Batch jobs remain protected after their definitions are deregistered. If an in-flight
-job uses a mutable tag, its whole repository is held because Batch does not expose the
-resolved image digest.
+- **Recent builds:** images pushed within `retention_days` (default **60 days**;
+  the installation example uses 90).
+- **Release floor:** the newest **10 tagged images** per repository by default.
+- **Deployed images:** current ECS service definitions, deployments, task sets and
+  running/pending task digests, including services scaled to zero.
+- **Rollback releases:** the latest **four distinct successful ECS image sets** per
+  service, including the current release, plus four recent task-definition recipes.
+- **Other consumers:** scheduled ECS tasks, container Lambda versions, active Batch
+  definitions and nonterminal jobs, CodeBuild and App Runner image references.
+- **Explicit pins:** `protected_tags` patterns and additional `protected_images` URIs.
+- **Related images:** connected OCI indices, architecture manifests and subject
+  artifacts whenever any member is retained. Archived/activating images are excluded.
 
-A site that has not been deployed for three months still has its current ECS digest
-retained. Image age does not override a current workload reference.
-
-ECS exposes only its most recent 90 days of deployment history. If a service has fewer
-than the requested distinct successful image sets available, cleanup **holds its entire
-repository** instead of guessing which old images are valid rollbacks. The dry-run/result
-reports `held_for_incomplete_history`. Other repositories can still be cleaned. This is
-also conservative for a young service that has not yet had four distinct releases.
+Image age never overrides a current workload reference. ECS exposes only 90 days of
+history; when the requested rollback history is unavailable, the cleaner holds the
+service's repositories. A young or rarely deployed service can therefore retain more
+images than the age/count settings suggest. Mutable Batch job tags also hold their
+repository because Batch does not expose the resolved image digest.
 
 ## Safety and scope
 
-The Lambda completes all configured repository and workload inventory before any
-mutation. Inventory/API failures, unresolved running ECR digests and missing required image references raise errors.
-An EKS cluster stops cleanup because this module does not have Kubernetes pod access.
-Actual deletion requires a second workload inventory; if references changed, the run
-stops. Repository metadata is refreshed again before the first deletion so new tag
-pins are respected. Indices/artifacts are deleted before their children/subjects in
-separate batches; per-image API failures raise a Lambda error instead of claiming success.
+- **Account-local discovery.** By default, all enabled regions are scanned. Cross-account
+  consumers, EC2-hosted containers and custom workflow references need durable protected
+  tags or explicit image pins. An EKS cluster stops cleanup because pod inventory is
+  unsupported. The [shared-repository example](https://github.com/SurtonInc/terraform-aws-ecr-cleanup/tree/main/examples/shared-repository)
+  conservatively retains all tagged versions for external consumers.
+- **Conflicting native policies.** Remove native ECR lifecycle rules that can expire
+  images this module would retain before enabling deletion.
+- **Inventory errors stop deletion.** Required inventory must complete successfully.
+  Write-enabled runs recheck workload references and repository metadata before deletion;
+  incomplete reads or per-image deletion failures are reported as errors.
+- **No deployment lock.** AWS reads and deletes are separate calls. A manual deployment
+  started after the final scan can race cleanup. Rebuild or explicitly protect an older
+  image before restoring a release outside the retained history.
 
-Discovery is **account-local**. Empty `scan_regions` discovers every enabled region;
-set a list only when the consumer region scope is known. Cross-account deployments,
-EC2-hosted containers, Kubernetes pods and arbitrary references embedded in custom
-workflow code are not automatically inventoried. Shared repositories with these
-consumers must use durable protected tags/patterns or explicit recovery URIs; for a
-small shared release repository, `protected_tags = ["*"]` conservatively retains all
-its tagged versions. Do not use unprotected external image consumers with write mode.
+Workload discovery permissions are read-only. ECR access is scoped to the configured
+repositories, and dry-run removes deletion permission from the role entirely.
 
-AWS inventory and deletion are not a transaction. The second scan detects changes
-between passes, but cannot lock a manual deployment that starts after that scan.
-Normal new builds are protected by the age window and recent-image floor, while the
-retained successful releases cover ordinary rollbacks. Rebuild or explicitly protect
-an older image before restoring a release outside the retained history. This module
-must not be described as a global deployment lock.
+## Reference and examples
 
-Existing native ECR lifecycle policies are independent and can delete images this
-module would retain. Remove conflicting policies in their owning Terraform states
-before enabling this cleaner. The module does not create or take ownership of ECR
-repositories or native lifecycle policies.
+The Registry's [Inputs](https://registry.terraform.io/modules/SurtonInc/ecr-cleanup/aws/latest?tab=inputs),
+[Outputs](https://registry.terraform.io/modules/SurtonInc/ecr-cleanup/aws/latest?tab=outputs)
+and [Dependencies](https://registry.terraform.io/modules/SurtonInc/ecr-cleanup/aws/latest?tab=dependencies)
+tabs provide the full configuration reference.
 
-Use one module instance per account/registry region. Give each instance a unique
-`name_prefix`, including region, because its IAM role/policy names are account-global.
-The Python Lambda source is included in the module and packaged locally with the
-`archive` provider; no separate Lambda artifact download is needed.
+- [Basic retention example](https://github.com/SurtonInc/terraform-aws-ecr-cleanup/tree/main/examples/basic)
+- [Shared repository with external consumers](https://github.com/SurtonInc/terraform-aws-ecr-cleanup/tree/main/examples/shared-repository)
 
-## Configuration
+Requires Terraform `>= 1.3.0`, AWS provider `>= 5.85.0, < 7.0.0` and archive provider
+`>= 2.4.0, < 3.0.0`. CI tests Terraform 1.14.5 and OpenTofu 1.13.2. The Python 3.13
+Lambda source is bundled and packaged locally by the archive provider.
 
-| Input | Default | Purpose |
-|---|---|---|
-| `repository_names` | required | Existing repositories in the provider account/region |
-| `retention_days` | `60` | Minimum push age for unprotected images |
-| `minimum_images` | `10` | Newest tagged images retained per repository |
-| `rollback_deployments` | `4` | Distinct successful ECS image sets retained per service |
-| `task_definition_revisions` | `4` | Newest definitions retained per family |
-| `protected_tags` | environment patterns | Exact or glob tag protection |
-| `protected_images` | `[]` | Extra image URIs to retain |
-| `scan_regions` | `[]` | Empty discovers all enabled regions |
-| `dry_run` | `true` | No deletes and no deletion IAM permission |
-| `schedule_enabled` | `true` | Enable scheduled execution |
-| `schedule_expression` | `cron(0 1 * * ? *)` | Daily, 01:00 UTC |
-| `lambda_timeout` | `600` | 60–900 seconds |
-| `lambda_memory_size` | `1024` | Lambda memory in MB |
-| `name_prefix` | `""` | Unique resource name prefix |
-| `alarm_actions` | `[]` | Optional existing SNS alarm action ARNs |
-| `tags` | `{}` | Resource tags |
-
-JSON environment configuration preserves comma-containing tag patterns. Invocation
-input `{"dry_run": true}` can request a dry-run, but cannot enable writes when the
-configured dry-run switch is on. CloudWatch logs contain plans and results, not service
-environment/secret values. A Lambda Errors alarm is created; wire `alarm_actions` to an
-existing operational destination if notifications are required.
-
-The Lambda uses Python 3.13 and the runtime-provided boto3 SDK. ECR read/write access
-is scoped to configured repositories. Workload discovery permissions are read-only;
-several AWS list/describe APIs require `Resource = "*"`.
-
-## Tests
-
-The module configuration retains its Terraform/OpenTofu version constraint of
-`>= 1.3.0`; the regression suite runs with Terraform 1.14.5 and OpenTofu 1.13.2.
-Provider constraints are AWS `>= 5.85.0, < 7.0.0` and archive `>= 2.4.0, < 3.0.0`.
-
-```sh
-PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p 'test_*.py' -v
-terraform init -backend=false
-terraform test
-
-# Or use OpenTofu:
-tofu init -backend=false
-tofu test
-```
-
-Unit tests mock every AWS call and require no credentials or boto3 installation.
-Both tools run the same test file. Its positive cases use `command = apply` with a
-mocked AWS provider so computed values can be asserted consistently; only the local
-archive provider executes. No test performs AWS mutations or cloud deletion.
-CI also initializes and validates both examples without credentials or a cloud plan.
+For contributors: [testing and release guidance](https://github.com/SurtonInc/terraform-aws-ecr-cleanup/blob/main/docs/publishing.md).
