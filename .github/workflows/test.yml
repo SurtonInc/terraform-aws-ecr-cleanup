@@ -6,16 +6,56 @@ on:
 permissions:
   contents: read
 jobs:
-  test:
+  python:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
       - name: Test cleanup without AWS access
         run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p 'test_*.py' -v
+  module:
+    name: ${{ matrix.tool }} module and examples
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        tool: [terraform, tofu]
+    steps:
+      - uses: actions/checkout@v6
       - uses: hashicorp/setup-terraform@v3
+        if: matrix.tool == 'terraform'
         with:
           terraform_version: 1.14.5
           terraform_wrapper: false
-      - run: terraform fmt -check -recursive
-      - run: terraform init -backend=false -input=false
-      - run: terraform test -no-color
+      - uses: opentofu/setup-opentofu@v2
+        if: matrix.tool == 'tofu'
+        with:
+          tofu_version: 1.13.2
+          tofu_wrapper: false
+      - name: Format, validate and test the module
+        env:
+          TF_TOOL: ${{ matrix.tool }}
+        run: |
+          "$TF_TOOL" fmt -check -recursive
+          "$TF_TOOL" init -backend=false -input=false
+          "$TF_TOOL" validate -no-color
+          "$TF_TOOL" test -no-color
+      - name: Validate examples without AWS access
+        env:
+          TF_TOOL: ${{ matrix.tool }}
+        run: |
+          for example in examples/*; do
+            "$TF_TOOL" -chdir="$example" init -backend=false -input=false
+            "$TF_TOOL" -chdir="$example" validate -no-color
+          done
+  test:
+    needs: [python, module]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require all test jobs to pass
+        env:
+          PYTHON_RESULT: ${{ needs.python.result }}
+          MODULE_RESULT: ${{ needs.module.result }}
+        run: |
+          test "$PYTHON_RESULT" = success
+          test "$MODULE_RESULT" = success

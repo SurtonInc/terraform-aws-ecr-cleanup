@@ -1,9 +1,11 @@
 mock_provider "aws" {
-  override_during = plan
   mock_data "aws_partition" { defaults = { partition = "aws" } }
   mock_data "aws_region" { defaults = { name = "us-west-2" } }
   mock_data "aws_caller_identity" { defaults = { account_id = "123456789012" } }
   mock_resource "aws_iam_role" { defaults = { arn = "arn:aws:iam::123456789012:role/cleanup" } }
+  mock_resource "aws_iam_policy" { defaults = { arn = "arn:aws:iam::123456789012:policy/cleanup" } }
+  mock_resource "aws_lambda_function" { defaults = { arn = "arn:aws:lambda:us-west-2:123456789012:function:cleanup" } }
+  mock_resource "aws_cloudwatch_event_rule" { defaults = { arn = "arn:aws:events:us-west-2:123456789012:rule/cleanup" } }
   mock_resource "aws_cloudwatch_log_group" { defaults = { arn = "arn:aws:logs:us-west-2:123456789012:log-group:/aws/lambda/test-cleanup" } }
 }
 variables {
@@ -11,7 +13,7 @@ variables {
   repository_names = ["example-api"]
 }
 run "dry_run_has_no_delete_permission" {
-  command = plan
+  command = apply
   assert {
     condition     = !strcontains(aws_iam_policy.lambda_policy.policy, "ecr:BatchDeleteImage") && aws_lambda_function.ecr_cleanup.environment[0].variables["DRY_RUN"] == "true"
     error_message = "Dry-run must prevent deletion both in code configuration and IAM."
@@ -33,7 +35,7 @@ run "dry_run_has_no_delete_permission" {
   }
 }
 run "enabled_deletion_is_scoped_to_requested_repositories" {
-  command = plan
+  command = apply
   variables { dry_run = false }
   assert {
     condition = alltrue([
@@ -58,7 +60,7 @@ run "invalid_repository_list_fails" {
   expect_failures = [var.repository_names]
 }
 run "schedule_can_be_disabled" {
-  command = plan
+  command = apply
   variables { schedule_enabled = false }
   assert {
     condition     = aws_cloudwatch_event_rule.schedule.state == "DISABLED"
