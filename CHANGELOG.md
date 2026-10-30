@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Lead the published README with registry installation and concise retention/rollout
+  guidance; remove obsolete prepublication instructions and duplicated reference tables.
+- Use absolute README/example links that work in both GitHub and registry renderers.
+
+## [0.2.1] - 2026-10-30
+
 ### Added
 
 - Test the module and examples with Terraform 1.14.5 and OpenTofu 1.13.2 in CI.
@@ -40,5 +48,6 @@
 - Propagate inventory and per-image deletion failures instead of reporting success.
 - Delete index/subject dependencies in ordered batches and recheck inventory before writes.
 
-[Unreleased]: https://github.com/SurtonInc/terraform-aws-ecr-cleanup/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/SurtonInc/terraform-aws-ecr-cleanup/compare/v0.2.1...HEAD
 [0.2.0]: https://github.com/SurtonInc/terraform-aws-ecr-cleanup/releases/tag/v0.2.0
+[0.2.1]: https://github.com/SurtonInc/terraform-aws-ecr-cleanup/compare/v0.2.0...v0.2.1

@@ -13,8 +13,8 @@ Publishing is a separate maintainer action.
 1. Review and merge the intended code. Require green Python, Terraform and OpenTofu
    checks, including example validation, at the exact release commit.
 2. Choose a semantic version and update `VERSION`. Keep an `Unreleased` changelog
-   section above dated, linked releases. The current preparation targets **0.2.1**;
-   `v0.2.0` already identifies the previous merged release and must not be moved.
+   section above dated, linked releases. The current preparation targets **0.2.2**;
+   existing release tags must not be moved.
 3. Create and push an immutable `vX.Y.Z` tag for the reviewed release commit when
    release authorization is given. `VERSION` alone does not publish a version.
    Future fixes receive a new version rather than replacing a published tag.
@@ -47,7 +47,7 @@ After both registries index the release, initialize a fresh consumer with each t
 ```hcl
 module "ecr_cleanup" {
   source  = "SurtonInc/ecr-cleanup/aws"
-  version = "0.2.1"
+  version = "0.2.2"
 
   name_prefix      = "application-us-west-2"
   repository_names = ["application-api"]
@@ -60,3 +60,19 @@ directories with an AWS provider configuration. Confirm each downloads the expec
 version from its own default registry. Initialization/validation needs no AWS apply.
 Consumers can then replace vendored copies through their own reviewed PRs while
 preserving module call names and the existing dry-run/retention configuration.
+
+## Contributor checks
+
+Run the Python tests and the shared mocked-provider suite with either CLI:
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p 'test_*.py' -v
+terraform init -backend=false
+terraform test
+# Or: tofu init -backend=false && tofu test
+```
+
+CI uses Terraform 1.14.5 and OpenTofu 1.13.2. Positive module tests apply mocked AWS
+resources so computed values can be checked consistently; only the local archive
+provider executes. The tests perform no AWS mutations. CI also initializes and
+validates both local examples without cloud credentials or an AWS plan.
