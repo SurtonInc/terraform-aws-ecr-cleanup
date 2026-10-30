@@ -1,12 +1,17 @@
 # ECR cleanup
 
-Scheduled, reference-aware retention for existing ECR repositories. Version 0.2.0
+Scheduled, reference-aware retention for existing ECR repositories. The module
 starts in **dry-run**: it logs a candidate plan and its IAM role cannot delete images.
 No manual cleanup-approval tags are required.
 
+## Installation
+
+Until the module is listed in the registries, use the public Git source at the
+released `v0.2.0` tag:
+
 ```hcl
 module "ecr_cleanup" {
-  source = "git::https://github.com/SurtonInc/terraform-ecr-cleanup.git?ref=<reviewed-commit>"
+  source = "git::https://github.com/SurtonInc/terraform-aws-ecr-cleanup.git?ref=v0.2.0"
 
   name_prefix          = "application-us-west-2"
   repository_names     = ["application-api"]
@@ -16,6 +21,23 @@ module "ecr_cleanup" {
   dry_run              = true
 }
 ```
+
+After registry registration and publication of the prepared 0.2.1 release, replace
+that source with:
+
+```hcl
+source  = "SurtonInc/ecr-cleanup/aws"
+version = "0.2.1"
+```
+
+The short source address uses each tool's default registry: Terraform Registry for
+Terraform and OpenTofu Registry for OpenTofu. Registry installation is not available
+until each registry has accepted the module and indexed the requested version.
+
+Runnable checkout examples: [basic](examples/basic) and
+[shared repository](examples/shared-repository). They use the local module so they
+can be validated before registry publication. See [publishing](docs/publishing.md)
+for the separate manual release and registration steps.
 
 Review the dry-run plan after deployment, then change `dry_run` to `false` through
 Terraform to enable the scheduled cleanup. This is a rollout switch, not a recurring
@@ -87,8 +109,8 @@ repositories or native lifecycle policies.
 
 Use one module instance per account/registry region. Give each instance a unique
 `name_prefix`, including region, because its IAM role/policy names are account-global.
-Private upstream modules require Git access during Terraform initialization. Vendored
-snapshots should retain the MIT license, upstream commit and file hashes.
+The Python Lambda source is included in the module and packaged locally with the
+`archive` provider; no separate Lambda artifact download is needed.
 
 ## Configuration
 
@@ -123,12 +145,22 @@ several AWS list/describe APIs require `Resource = "*"`.
 
 ## Tests
 
+The module configuration retains its Terraform/OpenTofu version constraint of
+`>= 1.3.0`; the regression suite runs with Terraform 1.14.5 and OpenTofu 1.13.2.
+Provider constraints are AWS `>= 5.85.0, < 7.0.0` and archive `>= 2.4.0, < 3.0.0`.
+
 ```sh
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p 'test_*.py' -v
 terraform init -backend=false
 terraform test
+
+# Or use OpenTofu:
+tofu init -backend=false
+tofu test
 ```
 
 Unit tests mock every AWS call and require no credentials or boto3 installation.
-Terraform tests use a mocked AWS provider and the local archive provider. No test
-performs cloud deletion.
+Both tools run the same test file. Its positive cases use `command = apply` with a
+mocked AWS provider so computed values can be asserted consistently; only the local
+archive provider executes. No test performs AWS mutations or cloud deletion.
+CI also initializes and validates both examples without credentials or a cloud plan.
