@@ -15,8 +15,8 @@ module "ecr_cleanup" {
   source  = "SurtonInc/ecr-cleanup/aws"
   version = "~> 0.2.1"
 
-  name_prefix      = "application-us-west-2"
-  repository_names = ["application-api"]
+  name_prefix      = "app-us-west-2"
+  repository_names = ["app-api"]
   retention_days   = 90
   dry_run          = true
 }

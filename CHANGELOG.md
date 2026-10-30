@@ -7,6 +7,7 @@
 - Lead the published README with registry installation and concise retention/rollout
   guidance; remove obsolete prepublication instructions and duplicated reference tables.
 - Use absolute README/example links that work in both GitHub and registry renderers.
+- Keep the installation example within narrow Registry content columns.
 
 ## [0.2.1] - 2026-10-30
 
