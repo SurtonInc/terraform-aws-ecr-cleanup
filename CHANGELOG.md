@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Upgrade the cleanup Lambda to Python 3.14 and require AWS provider 6.20 or newer
+  within major version 6. Consumers upgrading from provider 5 must reinitialize
+  providers and review the full Terraform plan before applying.
+
 ### Fixed
 
 - Lead the published README with registry installation and concise retention/rollout

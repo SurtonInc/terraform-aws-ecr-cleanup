@@ -92,8 +92,11 @@ tabs provide the full configuration reference.
 - [Basic retention example](https://github.com/SurtonInc/terraform-aws-ecr-cleanup/tree/main/examples/basic)
 - [Shared repository with external consumers](https://github.com/SurtonInc/terraform-aws-ecr-cleanup/tree/main/examples/shared-repository)
 
-Requires Terraform `>= 1.3.0`, AWS provider `>= 5.85.0, < 7.0.0` and archive provider
-`>= 2.4.0, < 3.0.0`. CI tests Terraform 1.14.5 and OpenTofu 1.13.2. The Python 3.13
+Requires Terraform `>= 1.3.0`, AWS provider `>= 6.20.0, < 7.0.0` and archive provider
+`>= 2.4.0, < 3.0.0`. CI tests Terraform 1.14.5 and OpenTofu 1.13.2. The Python 3.14
 Lambda source is bundled and packaged locally by the archive provider.
+
+When upgrading from AWS provider 5, run `terraform init -upgrade` in each consuming
+root stack and review the full plan before applying the major provider upgrade.
 
 For contributors: [testing and release guidance](https://github.com/SurtonInc/terraform-aws-ecr-cleanup/blob/main/docs/publishing.md).

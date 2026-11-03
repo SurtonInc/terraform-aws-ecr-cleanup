@@ -30,7 +30,7 @@ run "dry_run_has_no_delete_permission" {
     error_message = "Queued Batch job discovery requires all of its read permissions."
   }
   assert {
-    condition     = aws_lambda_function.ecr_cleanup.runtime == "python3.13" && aws_lambda_function.ecr_cleanup.reserved_concurrent_executions == 1 && aws_lambda_function.ecr_cleanup.memory_size == 1024
+    condition     = aws_lambda_function.ecr_cleanup.runtime == "python3.14" && aws_lambda_function.ecr_cleanup.reserved_concurrent_executions == 1 && aws_lambda_function.ecr_cleanup.memory_size == 1024
     error_message = "Use a supported runtime and avoid concurrent cleaners."
   }
 }
