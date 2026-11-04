@@ -2,11 +2,15 @@
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-11-04
+
 ### Changed
 
 - Upgrade the cleanup Lambda to Python 3.14 and require AWS provider 6.20 or newer
   within major version 6. Consumers upgrading from provider 5 must reinitialize
   providers and review the full Terraform plan before applying.
+
+## [0.2.2] - 2026-10-30
 
 ### Fixed
 
@@ -55,6 +59,8 @@
 - Propagate inventory and per-image deletion failures instead of reporting success.
 - Delete index/subject dependencies in ordered batches and recheck inventory before writes.
 
-[Unreleased]: https://github.com/SurtonInc/terraform-aws-ecr-cleanup/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/SurtonInc/terraform-aws-ecr-cleanup/compare/v0.2.3...HEAD
+[0.2.3]: https://github.com/SurtonInc/terraform-aws-ecr-cleanup/compare/v0.2.2...v0.2.3
+[0.2.2]: https://github.com/SurtonInc/terraform-aws-ecr-cleanup/compare/v0.2.1...v0.2.2
 [0.2.0]: https://github.com/SurtonInc/terraform-aws-ecr-cleanup/releases/tag/v0.2.0
 [0.2.1]: https://github.com/SurtonInc/terraform-aws-ecr-cleanup/compare/v0.2.0...v0.2.1
