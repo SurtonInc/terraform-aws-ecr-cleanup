@@ -82,7 +82,7 @@ resource "aws_lambda_function" "ecr_cleanup" {
     variables = {
       RETENTION_DAYS            = tostring(var.retention_days)
       PROTECTED_TAGS_JSON       = jsonencode(var.protected_tags)
-      PROTECTED_IMAGES_JSON     = jsonencode(var.protected_images)
+      PROTECTED_IMAGES_GZIP     = base64gzip(jsonencode(var.protected_images))
       REPOSITORIES_JSON         = jsonencode(var.repository_names)
       SCAN_REGIONS_JSON         = jsonencode(var.scan_regions)
       MINIMUM_IMAGES            = tostring(var.minimum_images)

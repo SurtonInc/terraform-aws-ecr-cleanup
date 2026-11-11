@@ -54,6 +54,8 @@ these protections applies:
 - **Other consumers:** scheduled ECS tasks, container Lambda versions, active Batch
   definitions and nonterminal jobs, CodeBuild and App Runner image references.
 - **Explicit pins:** `protected_tags` patterns and additional `protected_images` URIs.
+- Explicit image pins are compressed in the Lambda environment to leave room for
+  larger deployment inventories; the input remains a list of image URIs.
 - **Related images:** connected OCI indices, architecture manifests and subject
   artifacts whenever any member is retained. Archived/activating images are excluded.
 

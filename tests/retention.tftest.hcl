@@ -11,9 +11,14 @@ mock_provider "aws" {
 variables {
   name_prefix      = "test-us-west-2"
   repository_names = ["example-api"]
+  protected_images = ["123456789012.dkr.ecr.us-west-2.amazonaws.com/example-api@sha256:fixture"]
 }
 run "dry_run_has_no_delete_permission" {
   command = apply
+  assert {
+    condition     = aws_lambda_function.ecr_cleanup.environment[0].variables["PROTECTED_IMAGES_GZIP"] == base64gzip(jsonencode(var.protected_images))
+    error_message = "Explicit pins must be passed losslessly in compressed form."
+  }
   assert {
     condition     = !strcontains(aws_iam_policy.lambda_policy.policy, "ecr:BatchDeleteImage") && aws_lambda_function.ecr_cleanup.environment[0].variables["DRY_RUN"] == "true"
     error_message = "Dry-run must prevent deletion both in code configuration and IAM."

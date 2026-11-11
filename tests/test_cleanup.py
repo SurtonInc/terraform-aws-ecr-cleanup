@@ -1,4 +1,6 @@
+import base64
 import datetime as dt
+import gzip
 import importlib.util
 import json
 import os
@@ -50,6 +52,25 @@ class Client:
 
 
 class RetentionTests(unittest.TestCase):
+    def test_compressed_pins_preserve_legacy_and_new_references(self):
+        encoded = base64.b64encode(gzip.compress(json.dumps([URI + ":new"]).encode())).decode()
+        with patch.dict(os.environ, {
+            "PROTECTED_IMAGES_JSON": json.dumps([URI + ":old"]),
+            "PROTECTED_IMAGES_GZIP": encoded,
+        }, clear=True):
+            self.assertEqual(cleanup.protected_images(), {URI + ":old", URI + ":new"})
+
+    def test_invalid_compressed_pins_fail_closed(self):
+        with patch.dict(os.environ, {"PROTECTED_IMAGES_GZIP": "invalid"}, clear=True):
+            with self.assertRaises(ValueError):
+                cleanup.protected_images()
+
+    def test_compressed_object_is_not_accepted_as_a_pin_list(self):
+        encoded = base64.b64encode(gzip.compress(b'{"image": "uri"}')).decode()
+        with patch.dict(os.environ, {"PROTECTED_IMAGES_GZIP": encoded}, clear=True):
+            with self.assertRaises(ValueError):
+                cleanup.protected_images()
+
     def plan(self, items, refs=(), edges=(), minimum=1, patterns=()):
         return cleanup.retention_plan(
             {i["imageDigest"]: i for i in items},

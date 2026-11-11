@@ -4,6 +4,9 @@
 
 ### Fixed
 
+- Compress explicit image pins to fit larger deployments within Lambda's
+  environment-variable limit; existing plaintext pin configurations remain valid.
+
 - Retain the affected repository when a successful historical ECS release lacks
   an immutable image digest, allowing independent repositories to be cleaned
   without guessing which image ran. Incomplete current-workload inventory and

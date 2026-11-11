@@ -1,7 +1,9 @@
 """Reference-aware ECR cleanup. Inventory must succeed before any deletion."""
 
+import base64
 import datetime as dt
 import fnmatch
+import gzip
 import json
 import logging
 import os
@@ -22,6 +24,18 @@ IMAGE_CONFIG_TYPES = {
     "application/vnd.docker.container.image.v1+json",
     "application/vnd.oci.image.config.v1+json",
 }
+
+
+def protected_images():
+    """Read compressed deployment pins and older plaintext configurations."""
+    groups = [json.loads(os.environ.get("PROTECTED_IMAGES_JSON", "[]"))]
+    if os.environ.get("PROTECTED_IMAGES_GZIP"):
+        compressed = base64.b64decode(os.environ["PROTECTED_IMAGES_GZIP"], validate=True)
+        groups.append(json.loads(gzip.decompress(compressed)))
+    if any(not isinstance(pins, list) or not all(isinstance(pin, str) for pin in pins)
+           for pins in groups):
+        raise ValueError("Protected images must be a JSON array of image URIs")
+    return {pin for pins in groups for pin in pins}
 
 
 def pages(client, operation, key, **kwargs):
@@ -614,9 +628,7 @@ def handler(event, context):
             regions, rollback_count, definition_count, client, runner_regions
         )
 
-    references = discover() | set(
-        json.loads(os.environ.get("PROTECTED_IMAGES_JSON", "[]"))
-    )
+    references = discover() | protected_images()
     configured_dry_run = os.environ.get("DRY_RUN", "true").lower() == "true"
     requested = event.get("dry_run", False)
     if not isinstance(requested, bool):
@@ -629,8 +641,6 @@ def handler(event, context):
         int(os.environ["MINIMUM_IMAGES"]),
         json.loads(os.environ["PROTECTED_TAGS_JSON"]),
         configured_dry_run or requested,
-        lambda: (
-            discover() | set(json.loads(os.environ.get("PROTECTED_IMAGES_JSON", "[]")))
-        ),
+        lambda: discover() | protected_images(),
         context,
     )
