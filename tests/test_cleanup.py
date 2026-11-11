@@ -447,6 +447,43 @@ class DiscoveryTests(unittest.TestCase):
             self.assertIn(URI + "@sha256:" + name, refs)
         self.assertNotIn(URI + "@sha256:older", refs)
 
+    def test_unresolved_historical_tag_holds_only_its_repository(self):
+        ecs = Client(
+            {
+                "list_clusters": {"clusterArns": ["cluster"]},
+                "list_services": {"serviceArns": ["service"]},
+                "describe_services": {
+                    "services": [{"serviceArn": "service", "taskDefinition": "td:1"}]
+                },
+                "list_service_deployments": {
+                    "serviceDeployments": [
+                        {"status": "SUCCESSFUL", "targetServiceRevisionArn": "rev"}
+                    ]
+                },
+                "describe_service_revisions": {
+                    "serviceRevisions": [{
+                        "serviceRevisionArn": "rev",
+                        "taskDefinition": "td:1",
+                        "containerImages": [{"image": URI + ":old-tag"}],
+                    }]
+                },
+                "describe_task_definition": {
+                    "taskDefinition": {
+                        "containerDefinitions": [{"image": URI + ":current"}]
+                    }
+                },
+            }
+        )
+        refs = cleanup.inventory_region("us-west-2", 1, 1, self.clients(ecs))
+        self.assertIn("retain-all:" + URI, refs)
+        self.assertNotIn(URI + ":old-tag", refs)
+        images = {"sha256:old": image("sha256:old")}
+        self.assertFalse(cleanup.retention_plan(images, set(), refs - {URI + ":current"}, URI, NOW, 60, 1, []))
+        self.assertEqual(
+            cleanup.retention_plan(images, set(), refs, HOST + "/other", NOW, 60, 1, []),
+            {"sha256:old"},
+        )
+
     def test_missing_ecs_history_retains_entire_service_repository(self):
         ecs = Client(
             {

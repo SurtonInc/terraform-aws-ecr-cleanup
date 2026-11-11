@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Retain the affected repository when a successful historical ECS release lacks
+  an immutable image digest, allowing independent repositories to be cleaned
+  without guessing which image ran. Incomplete current-workload inventory and
+  missing required images still stop deletion.
+
 ## [0.2.3] - 2026-11-04
 
 ### Changed

@@ -208,9 +208,18 @@ def inventory_region(region, rollback_count, definition_count, client):
                                 and not ref[2].startswith("sha256:")
                                 and not image.get("imageDigest")
                             ):
-                                raise RuntimeError(
-                                    "Missing immutable digest in successful ECS release"
+                                # A historical mutable tag cannot identify the bytes
+                                # that ran. Hold this repository, without preventing
+                                # independent repositories from being inventoried.
+                                references.add("retain-all:" + ref[0] + "/" + ref[1])
+                                LOG.warning(
+                                    "Missing immutable digest in successful ECS release %s; "
+                                    "retaining repository %s/%s",
+                                    arn,
+                                    ref[0],
+                                    ref[1],
                                 )
+                                continue
                             release_images.add(
                                 resolved_uri(image["image"], image.get("imageDigest"))
                             )

@@ -13,7 +13,7 @@ Publishing is a separate maintainer action.
 1. Review and merge the intended code. Require green Python, Terraform and OpenTofu
    checks, including example validation, at the exact release commit.
 2. Choose a semantic version and update `VERSION`. Keep an `Unreleased` changelog
-   section above dated, linked releases. The current preparation targets **0.2.3**;
+   section above dated, linked releases. The current preparation targets **0.2.4**;
    existing release tags must not be moved.
 3. Create and push an immutable `vX.Y.Z` tag for the reviewed release commit when
    release authorization is given. `VERSION` alone does not publish a version.

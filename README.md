@@ -59,7 +59,10 @@ these protections applies:
 
 Image age never overrides a current workload reference. ECS exposes only 90 days of
 history; when the requested rollback history is unavailable, the cleaner holds the
-service's repositories. A young or rarely deployed service can therefore retain more
+service's repositories. A historical release with an unresolved mutable image tag
+also holds that image's entire repository; it does not stop cleanup of independent
+repositories. Current task digests and required image references must still resolve.
+A young or rarely deployed service can therefore retain more
 images than the age/count settings suggest. Mutable Batch job tags also hold their
 repository because Batch does not expose the resolved image digest.
 
