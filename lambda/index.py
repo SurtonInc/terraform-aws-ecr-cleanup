@@ -162,8 +162,9 @@ def batch_job_references(batch):
     return references
 
 
-def inventory_region(region, rollback_count, definition_count, client):
+def inventory_region(region, rollback_count, definition_count, client, retired_definitions=()):
     """Collect only references; do not log configuration/env/secret values."""
+    retired_definitions = set(retired_definitions)
     references = set()
     ecs = client("ecs", region)
     definitions = set()
@@ -177,6 +178,14 @@ def inventory_region(region, rollback_count, definition_count, client):
                 ),
                 "services",
             ):
+                if service["taskDefinition"] in retired_definitions:
+                    if any(service.get(key, 0) for key in
+                           ("desiredCount", "runningCount", "pendingCount")):
+                        raise RuntimeError("Retired task definition is required by a service")
+                    if any(d.get("desiredCount", 0) or d.get("runningCount", 0) or d.get("pendingCount", 0)
+                           for d in service.get("deployments", [])):
+                        raise RuntimeError("Retired service still has a live deployment")
+                    continue
                 service_definitions = {service["taskDefinition"]}
                 service_definitions.update(
                     d["taskDefinition"] for d in service.get("deployments", [])
@@ -184,7 +193,16 @@ def inventory_region(region, rollback_count, definition_count, client):
                 service_definitions.update(
                     t["taskDefinition"] for t in service.get("taskSets", [])
                 )
-                definitions.update(service_definitions)
+                for deployment in service.get("deployments", []):
+                    if deployment["taskDefinition"] in retired_definitions and any(
+                        deployment.get(key, 0) for key in
+                        ("desiredCount", "runningCount", "pendingCount")
+                    ):
+                        raise RuntimeError("Retired task definition has a live deployment")
+                for task_set in service.get("taskSets", []):
+                    if task_set["taskDefinition"] in retired_definitions:
+                        raise RuntimeError("Retired task definition is required by a task set")
+                definitions.update(service_definitions - retired_definitions)
                 deployments = pages(
                     ecs,
                     "list_service_deployments",
@@ -214,6 +232,8 @@ def inventory_region(region, rollback_count, definition_count, client):
                         raise RuntimeError("Incomplete ECS service revision inventory")
                     for arn in requested:
                         revision = by_arn[arn]
+                        if revision["taskDefinition"] in retired_definitions:
+                            continue
                         release_images = set()
                         for image in revision.get("containerImages", []):
                             ref = image_reference(image["image"])
@@ -258,14 +278,20 @@ def inventory_region(region, rollback_count, definition_count, client):
                     )
                     incomplete_history_definitions.update(service_definitions)
         # Desired RUNNING includes tasks whose actual status is PENDING.
-        tasks = pages(
+        tasks = sorted(set(pages(
             ecs, "list_tasks", "taskArns", cluster=cluster, desiredStatus="RUNNING"
-        )
+        )) | set(pages(
+            ecs, "list_tasks", "taskArns", cluster=cluster, desiredStatus="STOPPED"
+        )))
         for start in range(0, len(tasks), 100):
             for task in checked(
                 ecs.describe_tasks(cluster=cluster, tasks=tasks[start : start + 100]),
                 "tasks",
             ):
+                if task.get("lastStatus") == "STOPPED":
+                    continue
+                if task["taskDefinitionArn"] in retired_definitions:
+                    raise RuntimeError("Retired task definition still has a live task")
                 definitions.add(task["taskDefinitionArn"])
                 for container in task.get("containers", []):
                     if container.get("image"):
@@ -281,6 +307,7 @@ def inventory_region(region, rollback_count, definition_count, client):
         ):
             families[arn.rsplit(":", 1)[0]].append(arn)
     for arns in families.values():
+        arns = [arn for arn in arns if arn not in retired_definitions]
         definitions.update(
             sorted(arns, key=lambda a: int(a.rsplit(":", 1)[1]), reverse=True)[
                 :definition_count
@@ -290,6 +317,8 @@ def inventory_region(region, rollback_count, definition_count, client):
     events = client("events", region)
     for bus in pages(events, "list_event_buses", "EventBuses"):
         for rule in pages(events, "list_rules", "Rules", EventBusName=bus["Name"]):
+            if rule.get("State") == "DISABLED":
+                continue
             for target in pages(
                 events,
                 "list_targets_by_rule",
@@ -305,6 +334,8 @@ def inventory_region(region, rollback_count, definition_count, client):
         for schedule in pages(
             scheduler, "list_schedules", "Schedules", GroupName=group["Name"]
         ):
+            if schedule.get("State") == "DISABLED":
+                continue
             target = scheduler.get_schedule(
                 Name=schedule["Name"], GroupName=group["Name"]
             )["Target"]
@@ -312,6 +343,8 @@ def inventory_region(region, rollback_count, definition_count, client):
             if definition:
                 definitions.add(definition)
     for arn in definitions:
+        if arn in retired_definitions:
+            raise RuntimeError("Retired task definition is required by an enabled target")
         definition = ecs.describe_task_definition(taskDefinition=arn)["taskDefinition"]
         references.update(c["image"] for c in definition["containerDefinitions"])
         if arn in incomplete_history_definitions:
@@ -357,10 +390,11 @@ def inventory_region(region, rollback_count, definition_count, client):
 
 
 def inventory_references(
-    regions, rollback_count, definition_count, client, apprunner_regions
+    regions, rollback_count, definition_count, client, apprunner_regions,
+    retired_definitions=(),
 ):
     def collect(region):
-        refs = inventory_region(region, rollback_count, definition_count, client)
+        refs = inventory_region(region, rollback_count, definition_count, client, retired_definitions)
         if region in apprunner_regions:
             runner = client("apprunner", region)
             for service in pages(runner, "list_services", "ServiceSummaryList"):
@@ -623,9 +657,15 @@ def handler(event, context):
     definition_count = int(os.environ["TASK_DEFINITION_REVISIONS"])
     runner_regions = set(boto3.Session().get_available_regions("apprunner"))
 
+    retired = json.loads(gzip.decompress(base64.b64decode(
+        os.environ["RETIRED_TASK_DEFINITIONS_GZIP"], validate=True
+    ))) if os.environ.get("RETIRED_TASK_DEFINITIONS_GZIP") else []
+    if not isinstance(retired, list) or not all(isinstance(arn, str) for arn in retired):
+        raise ValueError("Retired task definitions must be a JSON array of ARNs")
+
     def discover():
         return inventory_references(
-            regions, rollback_count, definition_count, client, runner_regions
+            regions, rollback_count, definition_count, client, runner_regions, retired
         )
 
     references = discover() | protected_images()

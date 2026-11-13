@@ -105,3 +105,13 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "retired_task_definition_arns" {
+  description = "Explicitly retired task recipes whose old images may be absent. Live tasks, nonzero services and enabled schedules using them still stop cleanup."
+  type        = set(string)
+  default     = []
+  validation {
+    condition     = alltrue([for arn in var.retired_task_definition_arns : can(regex("^arn:aws[a-z-]*:ecs:[a-z0-9-]+:[0-9]{12}:task-definition/[^:]+:[0-9]+$", arn))])
+    error_message = "Retired task definitions must be full revision-qualified ECS ARNs."
+  }
+}

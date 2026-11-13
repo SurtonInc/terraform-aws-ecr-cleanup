@@ -80,15 +80,16 @@ resource "aws_lambda_function" "ecr_cleanup" {
   reserved_concurrent_executions = 1
   environment {
     variables = {
-      RETENTION_DAYS            = tostring(var.retention_days)
-      PROTECTED_TAGS_JSON       = jsonencode(var.protected_tags)
-      PROTECTED_IMAGES_GZIP     = base64gzip(jsonencode(var.protected_images))
-      REPOSITORIES_JSON         = jsonencode(var.repository_names)
-      SCAN_REGIONS_JSON         = jsonencode(var.scan_regions)
-      MINIMUM_IMAGES            = tostring(var.minimum_images)
-      ROLLBACK_DEPLOYMENTS      = tostring(var.rollback_deployments)
-      TASK_DEFINITION_REVISIONS = tostring(var.task_definition_revisions)
-      DRY_RUN                   = tostring(var.dry_run)
+      RETENTION_DAYS                = tostring(var.retention_days)
+      PROTECTED_TAGS_JSON           = jsonencode(var.protected_tags)
+      PROTECTED_IMAGES_GZIP         = base64gzip(jsonencode(var.protected_images))
+      REPOSITORIES_JSON             = jsonencode(var.repository_names)
+      SCAN_REGIONS_JSON             = jsonencode(var.scan_regions)
+      MINIMUM_IMAGES                = tostring(var.minimum_images)
+      ROLLBACK_DEPLOYMENTS          = tostring(var.rollback_deployments)
+      TASK_DEFINITION_REVISIONS     = tostring(var.task_definition_revisions)
+      DRY_RUN                       = tostring(var.dry_run)
+      RETIRED_TASK_DEFINITIONS_GZIP = base64gzip(jsonencode(sort(tolist(var.retired_task_definition_arns))))
     }
   }
   depends_on = [aws_iam_role_policy_attachment.lambda_policy_attachment, aws_cloudwatch_log_group.lambda_logs]

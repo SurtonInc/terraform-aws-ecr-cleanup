@@ -105,3 +105,13 @@ When upgrading from AWS provider 5, run `terraform init -upgrade` in each consum
 root stack and review the full plan before applying the major provider upgrade.
 
 For contributors: [testing and release guidance](https://github.com/SurtonInc/terraform-aws-ecr-cleanup/blob/main/docs/publishing.md).
+
+### Explicitly retired task recipes
+
+After an approved image cleanup, set `retired_task_definition_arns` to the exact
+revision-qualified recipes that can no longer be launched. Those recipes are
+excluded from historical release retention and zero-capacity retired services.
+A running/stopping task, nonzero service, active task set or enabled scheduled
+target using a retired recipe makes inventory fail before any deletion. Disabled
+rules/schedules are not active consumers. This option does not retire services
+or delete task definitions; keep the retirement decision in the caller's source.

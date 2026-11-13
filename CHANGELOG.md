@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Accept explicitly retired ECS task recipes after an approved image cleanup, while rejecting any live task, active service or enabled schedule that still requires them. Include tasks still stopping in reference checks.
+
 ### Fixed
 
 - Compress explicit image pins to fit larger deployments within Lambda's

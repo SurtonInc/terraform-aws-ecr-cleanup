@@ -72,3 +72,18 @@ run "schedule_can_be_disabled" {
     error_message = "The schedule disable switch must be honored."
   }
 }
+run "retired_recipes_are_revision_qualified_and_compressed" {
+  command = apply
+  variables {
+    retired_task_definition_arns = ["arn:aws:ecs:us-west-2:123456789012:task-definition/retired:3"]
+  }
+  assert {
+    condition     = aws_lambda_function.ecr_cleanup.environment[0].variables["RETIRED_TASK_DEFINITIONS_GZIP"] == base64gzip(jsonencode(sort(tolist(var.retired_task_definition_arns))))
+    error_message = "The Lambda must receive the exact explicit retirement list."
+  }
+}
+run "unqualified_retired_recipe_is_rejected" {
+  command = plan
+  variables { retired_task_definition_arns = ["retired"] }
+  expect_failures = [var.retired_task_definition_arns]
+}

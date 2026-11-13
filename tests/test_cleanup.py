@@ -366,6 +366,86 @@ class DiscoveryTests(unittest.TestCase):
     def clients(self, ecs):
         return lambda service, region: ecs if service == "ecs" else Client()
 
+    def retired_fixture(self, **service_updates):
+        service = {
+            "serviceArn": "service", "taskDefinition": "td:1",
+            "desiredCount": 0, "runningCount": 0, "pendingCount": 0,
+        }
+        service.update(service_updates)
+        return Client({
+            "list_clusters": {"clusterArns": ["cluster"]},
+            "list_services": {"serviceArns": ["service"]},
+            "describe_services": {"services": [service]},
+        })
+
+    def test_explicit_retirement_excludes_empty_service(self):
+        ecs = self.retired_fixture()
+        refs = cleanup.inventory_region("us-west-2", 4, 4, self.clients(ecs), {"td:1"})
+        self.assertEqual(refs, set())
+        self.assertNotIn("describe_task_definition", [op for op, _ in ecs.calls])
+
+    def test_retired_service_cannot_have_desired_or_pending_work(self):
+        for field in ("desiredCount", "runningCount", "pendingCount"):
+            with self.subTest(field=field), self.assertRaisesRegex(RuntimeError, "required by a service"):
+                cleanup.inventory_region("us-west-2", 4, 4,
+                                         self.clients(self.retired_fixture(**{field: 1})), {"td:1"})
+
+    def test_retired_service_cannot_hide_live_old_deployment(self):
+        ecs = self.retired_fixture(deployments=[{"taskDefinition": "td:2", "runningCount": 1}])
+        with self.assertRaisesRegex(RuntimeError, "live deployment"):
+            cleanup.inventory_region("us-west-2", 4, 4, self.clients(ecs), {"td:1"})
+
+    def test_retired_history_and_recipe_are_not_loaded(self):
+        ecs = self.retired_fixture(taskDefinition="td:2")
+        ecs.responses.update({
+            "list_task_definitions": {"taskDefinitionArns": ["td:1", "td:2"]},
+            "list_service_deployments": {"serviceDeployments": [
+                {"status": "SUCCESSFUL", "targetServiceRevisionArn": "rev"}
+            ]},
+            "describe_service_revisions": {"serviceRevisions": [{
+                "serviceRevisionArn": "rev", "taskDefinition": "td:1",
+                "containerImages": [{"image": URI + "@sha256:deleted"}],
+            }]},
+            "describe_task_definition": lambda **kw: {
+                "taskDefinition": {"containerDefinitions": [{"image": URI + "@sha256:current"}]}
+            },
+        })
+        refs = cleanup.inventory_region("us-west-2", 4, 4, self.clients(ecs), {"td:1"})
+        self.assertNotIn(URI + "@sha256:deleted", refs)
+        self.assertIn(URI + "@sha256:current", refs)
+        self.assertTrue(all(kw["taskDefinition"] == "td:2"
+                            for op, kw in ecs.calls if op == "describe_task_definition"))
+
+    def test_stopping_task_is_still_a_required_consumer(self):
+        ecs = Client({
+            "list_clusters": {"clusterArns": ["cluster"]},
+            "list_tasks": lambda **kw: {"taskArns": ["task"] if kw["desiredStatus"] == "STOPPED" else []},
+            "describe_tasks": {"tasks": [{"taskDefinitionArn": "td:1", "lastStatus": "STOPPING"}]},
+        })
+        with self.assertRaisesRegex(RuntimeError, "live task"):
+            cleanup.inventory_region("us-west-2", 4, 4, self.clients(ecs), {"td:1"})
+
+    def test_fully_stopped_retired_task_does_not_block(self):
+        ecs = Client({
+            "list_clusters": {"clusterArns": ["cluster"]},
+            "list_tasks": {"taskArns": ["task"]},
+            "describe_tasks": {"tasks": [{"taskDefinitionArn": "td:1", "lastStatus": "STOPPED"}]},
+        })
+        self.assertEqual(cleanup.inventory_region("us-west-2", 4, 4, self.clients(ecs), {"td:1"}), set())
+
+    def test_enabled_schedule_cannot_launch_retired_recipe(self):
+        scheduler = Client({
+            "list_schedule_groups": {"ScheduleGroups": [{"Name": "default"}]},
+            "list_schedules": {"Schedules": [{"Name": "job", "State": "ENABLED"}]},
+            "get_schedule": {"Target": {"EcsParameters": {"TaskDefinitionArn": "td:1"}}},
+        })
+        with self.assertRaisesRegex(RuntimeError, "enabled target"):
+            cleanup.inventory_region("us-west-2", 4, 4,
+                                     lambda name, region: scheduler if name == "scheduler" else Client(), {"td:1"})
+        scheduler.responses["list_schedules"] = {"Schedules": [{"Name": "job", "State": "DISABLED"}]}
+        self.assertEqual(cleanup.inventory_region("us-west-2", 4, 4,
+                         lambda name, region: scheduler if name == "scheduler" else Client(), {"td:1"}), set())
+
     def test_unresolved_running_ecr_digest_stops_cleanup(self):
         with self.assertRaisesRegex(RuntimeError, "Unresolved"):
             cleanup.resolved_uri(URI + ":prd", None)
