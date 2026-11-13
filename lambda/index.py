@@ -307,12 +307,10 @@ def inventory_region(region, rollback_count, definition_count, client, retired_d
         ):
             families[arn.rsplit(":", 1)[0]].append(arn)
     for arns in families.values():
-        arns = [arn for arn in arns if arn not in retired_definitions]
-        definitions.update(
-            sorted(arns, key=lambda a: int(a.rsplit(":", 1)[1]), reverse=True)[
-                :definition_count
-            ]
-        )
+        recent = sorted(arns, key=lambda a: int(a.rsplit(":", 1)[1]), reverse=True)[
+            :definition_count
+        ]
+        definitions.update(arn for arn in recent if arn not in retired_definitions)
 
     events = client("events", region)
     for bus in pages(events, "list_event_buses", "EventBuses"):

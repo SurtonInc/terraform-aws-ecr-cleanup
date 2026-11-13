@@ -425,6 +425,11 @@ class DiscoveryTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "live task"):
             cleanup.inventory_region("us-west-2", 4, 4, self.clients(ecs), {"td:1"})
 
+    def test_retired_recent_recipe_does_not_backfill_older_history(self):
+        ecs = Client({"list_task_definitions": {"taskDefinitionArns": ["td:1", "td:2"]}})
+        self.assertEqual(cleanup.inventory_region("us-west-2", 4, 1, self.clients(ecs), {"td:2"}), set())
+        self.assertNotIn("describe_task_definition", [op for op, _ in ecs.calls])
+
     def test_fully_stopped_retired_task_does_not_block(self):
         ecs = Client({
             "list_clusters": {"clusterArns": ["cluster"]},
